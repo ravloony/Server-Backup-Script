@@ -8,6 +8,9 @@
 # Modified by Tom Macdonald (www.thomas-macdonald.com)
 # Version 1.2
 
+# Repurposed to use git and dual ftp files
+# Version 2.0
+
 # Allgemeine Angaben
 MYSQL_USER=Benutzername_fuer_MySQL_meistens_root
 MYSQL_PASS=Passwort_fuer_MySQL
@@ -22,16 +25,17 @@ DIRECTORIES="/var/www/website /etc /var/log"
 # Festlegung des Datums - Format: 20050710
 DATE=`date +"%Y%m%d"`
 
+GIT_DIR="/root/backup"
+BACKUP_FILE_NAME=file_name
+TMP_DIR=`mktemp -d /tmp/backup.XXXX`
+
 # ENDE DER EINSTELLUNGEN
 
 echo "Starting backup run on $DATE"
 
-# Backup-Verzeichnis anlegen 
-TMPDIR=`mktemp -d /tmp/backup.XXXX`
+cd $GIT_DIR
 
-echo "In directory $TMPDIR"
-
-cd $TMPDIR
+echo "In directory $GIT_DIR"
 
 echo "Collecting databases"
 
@@ -39,7 +43,7 @@ echo "Collecting databases"
 for database in $MYSQL_DATABASES
 do
 	echo "Dumping $database"
-	mysqldump -u$MYSQL_USER -p$MYSQL_PASS $database | bzip2 > $database-$DATE.sql.bz2
+	mysqldump -u$MYSQL_USER -p$MYSQL_PASS $database > $database.sql
 	echo "Done"
 done
 
@@ -47,13 +51,24 @@ echo "Collecting files"
 
 for directory in $DIRECTORIES
 do
-	echo "copying $directory to $TMPDIR"
-	cp -r $directory $TMPDIR
-	dirname=`basename $directory`
-	echo "Compressing $dirname"
-	tar cjfp $dirname-$DATE.tar.bz2 $TMPDIR/$dirname
+	echo "copying $directory to $GIT_DIR"
+	cp -r $directory $GIT_DIR
 	echo "Done"
 done
+
+echo "Adding files to git"
+
+git add .
+
+echo "Committing backup point"
+
+git commit -m "`date`"
+
+cd $TMP_DIR
+
+echo "Compressing git directory"
+
+tar -cjpf $BACKUP_FILE_NAME.tar.bz2 $GIT_DIR
 
 echo "Starting ftp upload"
 
@@ -62,12 +77,16 @@ ftp -ni << END_UPLOAD
   open $FTP_SERVER
   user $FTP_USER $FTP_PASS
   bin
-  mput *.bz2
+  delete $BACKUP_FILE_NAME-past.tar.bz2
+  rename $BACKUP_FILE_NAME.tar.bz2 $BACKUP_FILE_NAME-past.tar.bz2
+  send $BACKUP_FILE_NAME.tar.bz2
   quit
 END_UPLOAD
 
-echo "Removing $TMPDIR"
-# Anschliessend alle auf den Server angelegten Dateien wieder loeschen
-rm -r -f $TMPDIR
+cd
 
-echo "finished"
+echo "Removing $TMP_DIR"
+# Anschliessend alle auf den Server angelegten Dateien wieder loeschen
+rm -r -f $TMP_DIR
+
+echo "Finished"
